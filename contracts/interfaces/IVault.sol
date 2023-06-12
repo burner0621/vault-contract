@@ -12,9 +12,9 @@ interface IVault {
     }
 
     // #### Event definitions
-    event Deposit(uint256 collateralDeposited, uint256 amountMinted);
-    event Withdraw(uint256 collateralWithdrawn, uint256 amountBurned);
-    event SwapAll(string symbol, uint256 amount, uint256 timestampSwap);
+    event Deposit(string strTopic, address userAddress, uint256 collateralDeposited, uint256 amountMinted, uint256 timestampDeposit);
+    event Withdraw(string strTopic, address userAddress, uint256 collateralWithdrawn, uint256 amountBurned, uint256 timestampWithdraw);
+    event SwapAll(string strTopic, string strType, uint256 amount, uint256 timestampSwap);
 
     // #### Function definitions
 
@@ -22,7 +22,7 @@ interface IVault {
     @notice Allows a user to deposit ETH collateral in exchange for some amount of stablecoin
     @param amountToDeposit  The amount of ether the user sent in the transaction
      */
-    function deposit(address depositTokenAddress, uint256 amountToDeposit) external ;
+    function deposit(address depositTokenAddress, uint256 amountToDeposit) external;
 
     function initializeVault(
         uint256 usdcAmount,
@@ -55,13 +55,4 @@ interface IVault {
     function estimateCollateralAmount(
         uint256 repaymentAmount
     ) external view returns (uint256 collateralAmount);
-
-    /**
-    @notice Returns an estimate on how much stable coin could be minted at the current rate
-    @param depositAmount the amount of ETH that would be deposited
-    @return tokenAmount  the estimated amount of stablecoin that would be minted
-     */
-    function estimateTokenAmount(
-        uint256 depositAmount
-    ) external view returns (uint256 tokenAmount);
 }

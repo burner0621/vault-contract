@@ -23,7 +23,7 @@
     "chai": "^4.3.0",
     "ethereum-waffle": "^3.4.4",
     "ethers": "^5.4.6",
-    "hardhat": "^2.6.1",
+    "hardhat": "^2.15.0",
     "hardhat-contract-sizer": "^2.0.3",
     "node-fetch": "3.2.3",
     "typechain": "^5.1.2"
