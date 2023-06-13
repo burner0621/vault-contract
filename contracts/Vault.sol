@@ -104,17 +104,9 @@ contract Vault is IVault, Ownable {
     ) external override {
         require(amountToDeposit > 0, "incorrect token amount");
         require(depositTokenAddress == usdcAddress, "incorrect token");
-        require(bSwap == true, "swapping");
+        require(bSwap == false, "swapping");
 
         uint256 timestamp = block.timestamp;
-
-        // if (symbol == "ETH") {
-        //     uint256 amountToMint = amountToDeposit * getEthUSDPrice();
-
-        //     totalVaultEth = totalVaultEth + amountToDeposit;
-
-        //     lpToken.mint(msg.sender, amountToMint);
-        // }
 
         require(
             usdcToken.balanceOf(msg.sender) >
@@ -129,33 +121,35 @@ contract Vault is IVault, Ownable {
             (10 ** priceDecimal);
 
         uint256 estimatedLpTokens = 0;
-        if (compareStrings(curCoin, "usdc")) {
-            uint256 totalAmountUsd = (totalVaultUSDC * usdcPrice) /
-                (10 ** priceDecimal);
-            estimatedLpTokens =
-                (amountToMint *
-                    (10 ** usdcToken.decimals()) *
-                    lpToken.totalSupply()) /
-                totalAmountUsd;
-            totalVaultUSDC =
-                totalVaultUSDC +
-                amountToDeposit *
-                (10 ** usdcToken.decimals());
-        } else if (compareStrings(curCoin, "eth")) {
-            uint256 totalAmountUsd = (totalVaultEth * ethPrice) /
-                (10 ** priceDecimal);
-            estimatedLpTokens =
-                (amountToMint *
-                    (10 ** wethToken.decimals()) *
-                    lpToken.totalSupply()) /
-                totalAmountUsd;
-            totalVaultEth =
-                totalVaultEth +
-                amountToDeposit *
-                (10 ** wethToken.decimals());
-        }
+        // if (compareStrings(curCoin, "usdc")) {
+        uint256 totalAmountUsd = (totalVaultUSDC *
+            usdcPrice *
+            (10 ** (wethToken.decimals() - usdcToken.decimals())) +
+            totalVaultEth *
+            ethPrice) / (10 ** priceDecimal);
+        estimatedLpTokens =
+            (amountToMint *
+                (10 ** lpToken.decimals()) *
+                lpToken.totalSupply()) /
+            totalAmountUsd;
+        totalVaultUSDC =
+            totalVaultUSDC +
+            amountToDeposit *
+            (10 ** usdcToken.decimals());
+        // } else if (compareStrings(curCoin, "eth")) {
+        //     uint256 totalAmountUsd = (totalVaultEth * ethPrice + totalVaultUSDC * usdcPrice * (10 ** (wethToken.decimals() - usdcToken.decimals()))) /
+        //         (10 ** priceDecimal);
+        //     estimatedLpTokens =
+        //         (amountToMint *
+        //             (10 ** lpToken.decimals()) *
+        //             lpToken.totalSupply()) /
+        //         totalAmountUsd;
+        //     totalVaultEth =
+        //         totalVaultEth +
+        //         amountToDeposit *
+        //         (10 ** wethToken.decimals());
+        // }
 
-        // usdcToken.approve(address(this), amountToDeposit * (10 ** usdcToken.decimals()));
         usdcToken.transferFrom(
             msg.sender,
             address(this),
@@ -169,15 +163,19 @@ contract Vault is IVault, Ownable {
         vaults[msg.sender].debtAmount +=
             amountToMint *
             (10 ** usdcToken.decimals());
-        emit Deposit("Deposit", msg.sender, vaults[msg.sender].collateralAmount, vaults[msg.sender].debtAmount, timestamp);
+        emit Deposit(
+            "Deposit",
+            msg.sender,
+            vaults[msg.sender].collateralAmount,
+            vaults[msg.sender].debtAmount,
+            timestamp
+        );
     }
 
     function initializeVault(
         uint256 usdcAmount,
         uint256 lpTokenAmount
     ) external override {
-        usdcAmount = usdcAmount * (10 ** usdcToken.decimals());
-        lpTokenAmount = lpTokenAmount * (10 ** lpToken.decimals());
         require(
             msg.sender == firstDepositWalletAddress,
             "banned initializing vault"
@@ -192,6 +190,9 @@ contract Vault is IVault, Ownable {
             totalVaultEth == 0 && wethToken.balanceOf(address(this)) == 0,
             "total eth amount is not zero. banned initializing"
         );
+
+        usdcAmount = usdcAmount * (10 ** usdcToken.decimals());
+        lpTokenAmount = lpTokenAmount * (10 ** lpToken.decimals());
 
         require(
             usdcToken.balanceOf(msg.sender) > usdcAmount,
@@ -220,56 +221,53 @@ contract Vault is IVault, Ownable {
     function withdraw(uint256 lptokenAmount) external override {
         lptokenAmount = lptokenAmount * (10 ** lpToken.decimals());
 
+        require(lptokenAmount > 0, "insufficient lp tokens");
+
         require(
-            lptokenAmount > 0,
+            lptokenAmount < lpToken.balanceOf(msg.sender),
             "insufficient lp tokens"
         );
 
-        require(
-            lptokenAmount < lpToken.totalSupply(),
-            "insufficient lp tokens"
-        );
-
-        require(bSwap == true, "swapping");
-
-        uint256 repaymentAmount = lptokenAmount / lpToken.totalSupply() * totalVaultUSDC;
-        require(
-            repaymentAmount <= vaults[msg.sender].debtAmount,
-            "withdraw limit exceeded"
-        );
-
-        // require(
-        //     token.balanceOf(msg.sender) >= repaymentAmount,
-        //     "not enough tokens in balance"
-        // );
+        require(bSwap == false, "swapping");
 
         uint256 usdcPrice = getUSDCUSDPrice();
         uint256 ethPrice = getEthUSDPrice();
 
-        uint256 usdcTokens = repaymentAmount /
-            (usdcPrice / (10 ** priceDecimal));
+        uint256 usdcTokens = (lptokenAmount *
+            (totalVaultUSDC +
+                (totalVaultEth * (ethPrice / usdcPrice)) /
+                (10 ** (wethToken.decimals() - usdcToken.decimals())))) /
+            lpToken.totalSupply();
+        require(
+            usdcTokens <= vaults[msg.sender].collateralAmount,
+            "withdraw limit exceeded"
+        );
+
+        uint256 withdrawUSD = (usdcTokens * usdcPrice) / (10 ** priceDecimal);
         if (compareStrings(curCoin, "usdc")) {
-            usdcToken.approve(msg.sender, usdcTokens);
-            usdcToken.transferFrom(address(this), msg.sender, usdcTokens);
+            require(
+                usdcToken.balanceOf(address(this)) >= usdcTokens,
+                "insufficient balance"
+            );
+            require(
+                usdcToken.transfer(msg.sender, usdcTokens),
+                "transfer failed in withdraw"
+            );
             vaults[msg.sender].collateralAmount -= usdcTokens;
-            vaults[msg.sender].debtAmount -= repaymentAmount;
+            vaults[msg.sender].debtAmount -= withdrawUSD;
             totalVaultUSDC -= usdcTokens;
         } else if (compareStrings(curCoin, "eth")) {
-            repaymentAmount =
-                (repaymentAmount / 10 ** usdcToken.decimals()) ** 10 **
-                    wethToken.decimals();
-            uint256 ethTokens = (repaymentAmount * (10 ** priceDecimal)) /
+            uint256 withdrawUSDForETH = (withdrawUSD /
+                (10 ** usdcToken.decimals())) * (10 ** wethToken.decimals());
+            uint256 ethTokens = (withdrawUSDForETH * (10 ** priceDecimal)) /
                 ethPrice;
 
             require(ethTokens < totalVaultEth, "insufficient eth value");
 
-            // swap(wethAddress, usdcAddress, ethTokens, 0, msg.sender);
-            // require(MyERC20(wethAddress).transferFrom(
-            //     msg.sender,
-            //     address(this),
-            //     ethTokens
-            // ), "transferFrom failed usdcaddress");
-            require(MyERC20(wethAddress).approve(UNISWAP_V2_ROUTER, ethTokens), "approve failed usdc address");
+            require(
+                MyERC20(wethAddress).approve(UNISWAP_V2_ROUTER, ethTokens),
+                "approve failed usdc address"
+            );
             address[] memory path = new address[](2);
             path[0] = wethAddress;
             path[1] = usdcAddress;
@@ -281,45 +279,46 @@ contract Vault is IVault, Ownable {
                 block.timestamp
             );
 
-            totalVaultEth -= ethTokens;
+            totalVaultEth = wethToken.balanceOf(address(this));
 
             vaults[msg.sender].collateralAmount -= usdcTokens;
             vaults[msg.sender].debtAmount -=
-                (repaymentAmount / (10 ** wethToken.decimals())) *
+                (withdrawUSDForETH / (10 ** wethToken.decimals())) *
                 (10 ** usdcToken.decimals());
             totalVaultUSDC -= usdcTokens;
         }
         lpToken.burn(msg.sender, lptokenAmount);
 
-        emit Withdraw("Withdraw", msg.sender, vaults[msg.sender].collateralAmount, vaults[msg.sender].debtAmount, block.timestamp);
+        emit Withdraw(
+            "Withdraw",
+            msg.sender,
+            vaults[msg.sender].collateralAmount,
+            vaults[msg.sender].debtAmount,
+            block.timestamp
+        );
     }
 
-    function swapAll() external override {  // not external
+    function swapAll() external override {
+        // not external
         require(msg.sender == controlAddress, "incorrect AI bot account");
         bSwap = true;
 
-        if(wethToken.balanceOf(controlAddress) < 0.1 * (10 ** wethToken.decimals()))
-        {
-            wethToken.approve(address(controlAddress), 0.1 * (10 ** wethToken.decimals()));
-            wethToken.withdraw(0.1 * (10 ** wethToken.decimals()));
+        if (
+            wethToken.balanceOf(controlAddress) <
+            (10 ** (wethToken.decimals() - 1))
+        ) {
+            wethToken.withdraw(10 ** (wethToken.decimals() - 1));
+            payable(msg.sender).transfer(address(this).balance);
         }
 
         if (compareStrings(curCoin, "usdc")) {
             curCoin = "eth";
-            // swap(usdcAddress, wethAddress, totalVaultUSDC, 0, address(this));
-            // require(MyERC20(usdcAddress).transferFrom(
-            //     msg.sender,
-            //     address(this),
-            //     totalVaultUSDC
-            // ), "transferFrom failed usdcaddress");
-            
-            //require(MyERC20(usdcAddress).approve(UNISWAP_V2_ROUTER, totalVaultUSDC), "approve failed usdc address");
-            if(!MyERC20(usdcAddress).approve(UNISWAP_V2_ROUTER, totalVaultUSDC))
-            {
+
+            if (
+                !MyERC20(usdcAddress).approve(UNISWAP_V2_ROUTER, totalVaultUSDC)
+            ) {
                 bSwap = false;
-            }
-            else
-            {
+            } else {
                 address[] memory path = new address[](2);
                 path[0] = usdcAddress;
                 path[1] = wethAddress;
@@ -335,24 +334,21 @@ contract Vault is IVault, Ownable {
                 totalVaultEth = wethToken.balanceOf(address(this));
                 bSwap = false;
 
-                emit SwapAll("SwapAll", "usdc", totalVaultUSDC, block.timestamp);
+                emit SwapAll(
+                    "SwapAll",
+                    "usdc",
+                    totalVaultUSDC,
+                    block.timestamp
+                );
             }
         } else if (compareStrings(curCoin, "eth")) {
             curCoin = "usdc";
-            // swap(wethAddress, usdcAddress, totalVaultEth, 0, address(this));
 
-            // require(MyERC20(wethAddress).transferFrom(
-            //     msg.sender,
-            //     address(this),
-            //     totalVaultEth
-            // ), "transferFrom failed wethaddress");
-            //require(MyERC20(wethAddress).approve(UNISWAP_V2_ROUTER, totalVaultEth), "approve failed weth address");
-            if(!MyERC20(wethAddress).approve(UNISWAP_V2_ROUTER, totalVaultEth))
-            {
+            if (
+                !MyERC20(wethAddress).approve(UNISWAP_V2_ROUTER, totalVaultEth)
+            ) {
                 bSwap = false;
-            }
-            else
-            {
+            } else {
                 address[] memory pathW = new address[](2);
                 pathW[0] = wethAddress;
                 pathW[1] = usdcAddress;
@@ -390,13 +386,30 @@ contract Vault is IVault, Ownable {
 
     /**
     @notice Returns an estimate of how much collateral could be withdrawn for a given amount of stablecoin
-    @param repaymentAmount  the amount of stable coin that would be repaid
+    @param lptokenAmount  the amount of stable coin that would be repaid
     @return collateralAmount the estimated amount of a vault's collateral that would be returned 
      */
     function estimateCollateralAmount(
-        uint256 repaymentAmount
+        uint256 lptokenAmount
     ) external view override returns (uint256 collateralAmount) {
-        return repaymentAmount / getEthUSDPrice();
+        lptokenAmount = lptokenAmount * (10 ** lpToken.decimals());
+
+        require(lptokenAmount > 0, "insufficient lp tokens");
+
+        require(
+            lptokenAmount < lpToken.totalSupply(),
+            "insufficient lp tokens"
+        );
+
+        uint256 usdcPrice = getUSDCUSDPrice();
+        uint256 ethPrice = getEthUSDPrice();
+
+        collateralAmount =
+            (lptokenAmount / lpToken.totalSupply()) *
+            (totalVaultUSDC +
+                (totalVaultEth * ethPrice) /
+                (usdcPrice *
+                    10 ** (wethToken.decimals() - usdcToken.decimals())));
     }
 
     /**
@@ -413,6 +426,10 @@ contract Vault is IVault, Ownable {
     function getEthUSDPrice() public view returns (uint256) {
         uint price8 = uint(oracle.getETHLatestPrice());
         return price8;
+    }
+
+    function getSwapFlag() public view returns (bool) {
+        return bSwap;
     }
 
     function getUSDCUSDPrice() public view returns (uint256) {

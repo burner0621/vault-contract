@@ -49,10 +49,10 @@ interface IVault {
 
     /**
     @notice Returns an estimate of how much collateral could be withdrawn for a given amount of stablecoin
-    @param repaymentAmount  the amount of stable coin that would be repaid
+    @param lptokenAmount  the amount of stable coin that would be repaid
     @return collateralAmount the estimated amount of a vault's collateral that would be returned 
      */
     function estimateCollateralAmount(
-        uint256 repaymentAmount
+        uint256 lptokenAmount
     ) external view returns (uint256 collateralAmount);
 }
