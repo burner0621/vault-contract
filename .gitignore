@@ -1,9 +1,8 @@
 node_modules
 build
 @openzeppelin
-.env
+env.json
 node_modules
-.env
 coverage
 coverage.json
 typechain
