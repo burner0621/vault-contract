@@ -52,9 +52,6 @@ contract Vault is IVault, Ownable {
 
     address private controlAddress = 0x42d0b8efF2fFF1a70B57C8E96bE77C2e49A774c3;
 
-    address private firstDepositWalletAddress =
-        0x42d0b8efF2fFF1a70B57C8E96bE77C2e49A774c3;
-
     address private constant UNISWAP_V2_ROUTER =
         0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
 
@@ -175,11 +172,7 @@ contract Vault is IVault, Ownable {
     function initializeVault(
         uint256 usdcAmount,
         uint256 lpTokenAmount
-    ) external override {
-        require(
-            msg.sender == firstDepositWalletAddress,
-            "banned initializing vault"
-        );
+    ) external override onlyOwner(){
         require(usdcAmount > 0, "incorrect usdc token amount");
         require(lpTokenAmount > 0, "incorrect lp token amount");
         require(
