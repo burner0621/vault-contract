@@ -12,8 +12,8 @@ interface IVault {
     }
 
     // #### Event definitions
-    event Deposit(string strTopic, address userAddress, uint256 collateralDeposited, uint256 amountMinted, uint256 timestampDeposit);
-    event Withdraw(string strTopic, address userAddress, uint256 collateralWithdrawn, uint256 amountBurned, uint256 timestampWithdraw);
+    event Deposit(string strTopic, address userAddress, uint256 amountToDeposit, uint256 timestampDeposit);
+    event Withdraw(string strTopic, address userAddress, uint256 lptokenAmount, uint256 timestampWithdraw);
     event SwapAll(string strTopic, string strType, uint256 amount, uint256 timestampSwap);
 
     // #### Function definitions
@@ -22,7 +22,7 @@ interface IVault {
     @notice Allows a user to deposit ETH collateral in exchange for some amount of stablecoin
     @param amountToDeposit  The amount of ether the user sent in the transaction
      */
-    function deposit(address depositTokenAddress, uint256 amountToDeposit) external;
+    function deposit(uint256 amountToDeposit) external;
 
     function initializeVault(
         uint256 usdcAmount,

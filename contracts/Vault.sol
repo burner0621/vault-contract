@@ -27,6 +27,12 @@ interface IUniswapV2Router {
         //the last time that the trade is valid for
         uint256 deadline
     ) external returns (uint256[] memory amounts);
+
+    function getAmountOut(
+        uint amountIn,
+        uint reserveIn,
+        uint reserveOut
+    ) external pure returns (uint amountOut);
 }
 
 interface IUniswapV2Pair {
@@ -40,6 +46,11 @@ interface IUniswapV2Pair {
         address to,
         bytes calldata data
     ) external;
+
+    function getReserves()
+        external
+        view
+        returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
 }
 
 contract Vault is IVault, Ownable {
@@ -50,7 +61,9 @@ contract Vault is IVault, Ownable {
     // address private usdcAddress = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // mainnet
     address private usdcAddress = 0xB72Bb8CD764006641de1687b3e3C89957106F460;
 
-    address private controlAddress = 0x42d0b8efF2fFF1a70B57C8E96bE77C2e49A774c3;
+    address private controlAddress = 0x42d0b8efF2fFF1a70B57C8E96bE77C2e49A774c3; // AI bot address
+
+    uint256 slippage;
 
     address private constant UNISWAP_V2_ROUTER =
         0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
@@ -75,13 +88,10 @@ contract Vault is IVault, Ownable {
     uint256 public totalVaultUSDC;
 
     constructor(address _lpTokenAddress, address _oracle) {
-        // constructor() {
-        //
         wethToken = MyERC20(wethAddress);
         usdcToken = MyERC20(usdcAddress);
 
         lpToken = LpToken(_lpTokenAddress);
-        // lpToken = new LpToken();
         curCoin = "usdc";
 
         totalVaultUSDC = 0;
@@ -89,6 +99,8 @@ contract Vault is IVault, Ownable {
 
         bSwap = false;
         oracle = PriceConsumerV3(_oracle);
+
+        slippage = 20; // 0.2 %
     }
 
     /**
@@ -96,11 +108,9 @@ contract Vault is IVault, Ownable {
     @param amountToDeposit  The amount of usdc the user sent in the transaction
      */
     function deposit(
-        address depositTokenAddress,
         uint256 amountToDeposit
     ) external override {
         require(amountToDeposit > 0, "incorrect token amount");
-        require(depositTokenAddress == usdcAddress, "incorrect token");
         require(bSwap == false, "swapping");
 
         uint256 timestamp = block.timestamp;
@@ -118,7 +128,7 @@ contract Vault is IVault, Ownable {
             (10 ** priceDecimal);
 
         uint256 estimatedLpTokens = 0;
-        // if (compareStrings(curCoin, "usdc")) {
+
         uint256 totalAmountUsd = (totalVaultUSDC *
             usdcPrice *
             (10 ** (wethToken.decimals() - usdcToken.decimals())) +
@@ -133,19 +143,6 @@ contract Vault is IVault, Ownable {
             totalVaultUSDC +
             amountToDeposit *
             (10 ** usdcToken.decimals());
-        // } else if (compareStrings(curCoin, "eth")) {
-        //     uint256 totalAmountUsd = (totalVaultEth * ethPrice + totalVaultUSDC * usdcPrice * (10 ** (wethToken.decimals() - usdcToken.decimals()))) /
-        //         (10 ** priceDecimal);
-        //     estimatedLpTokens =
-        //         (amountToMint *
-        //             (10 ** lpToken.decimals()) *
-        //             lpToken.totalSupply()) /
-        //         totalAmountUsd;
-        //     totalVaultEth =
-        //         totalVaultEth +
-        //         amountToDeposit *
-        //         (10 ** wethToken.decimals());
-        // }
 
         usdcToken.transferFrom(
             msg.sender,
@@ -154,17 +151,16 @@ contract Vault is IVault, Ownable {
         );
 
         lpToken.mint(msg.sender, estimatedLpTokens);
-        vaults[msg.sender].collateralAmount +=
-            amountToDeposit *
-            (10 ** usdcToken.decimals());
-        vaults[msg.sender].debtAmount +=
-            amountToMint *
-            (10 ** usdcToken.decimals());
+        // vaults[msg.sender].collateralAmount +=
+        //     amountToDeposit *
+        //     (10 ** usdcToken.decimals());
+        // vaults[msg.sender].debtAmount +=
+        //     amountToMint *
+        //     (10 ** usdcToken.decimals());
         emit Deposit(
             "Deposit",
             msg.sender,
-            vaults[msg.sender].collateralAmount,
-            vaults[msg.sender].debtAmount,
+            amountToDeposit,
             timestamp
         );
     }
@@ -172,7 +168,7 @@ contract Vault is IVault, Ownable {
     function initializeVault(
         uint256 usdcAmount,
         uint256 lpTokenAmount
-    ) external override onlyOwner(){
+    ) external override onlyOwner {
         require(usdcAmount > 0, "incorrect usdc token amount");
         require(lpTokenAmount > 0, "incorrect lp token amount");
         require(
@@ -202,8 +198,8 @@ contract Vault is IVault, Ownable {
             (10 ** priceDecimal);
         totalVaultUSDC = usdcAmount;
         lpToken.mint(msg.sender, lpTokenAmount);
-        vaults[msg.sender].collateralAmount += usdcAmount;
-        vaults[msg.sender].debtAmount += amountToMint;
+        // vaults[msg.sender].collateralAmount += usdcAmount;
+        // vaults[msg.sender].debtAmount += amountToMint;
     }
 
     /**
@@ -228,13 +224,9 @@ contract Vault is IVault, Ownable {
 
         uint256 usdcTokens = (lptokenAmount *
             (totalVaultUSDC +
-                (totalVaultEth * (ethPrice / usdcPrice)) /
+                ((totalVaultEth * ethPrice) / usdcPrice) /
                 (10 ** (wethToken.decimals() - usdcToken.decimals())))) /
             lpToken.totalSupply();
-        require(
-            usdcTokens <= vaults[msg.sender].collateralAmount,
-            "withdraw limit exceeded"
-        );
 
         uint256 withdrawUSD = (usdcTokens * usdcPrice) / (10 ** priceDecimal);
         if (compareStrings(curCoin, "usdc")) {
@@ -246,9 +238,7 @@ contract Vault is IVault, Ownable {
                 usdcToken.transfer(msg.sender, usdcTokens),
                 "transfer failed in withdraw"
             );
-            vaults[msg.sender].collateralAmount -= usdcTokens;
-            vaults[msg.sender].debtAmount -= withdrawUSD;
-            totalVaultUSDC -= usdcTokens;
+            totalVaultUSDC = usdcToken.balanceOf(address(this));
         } else if (compareStrings(curCoin, "eth")) {
             uint256 withdrawUSDForETH = (withdrawUSD /
                 (10 ** usdcToken.decimals())) * (10 ** wethToken.decimals());
@@ -259,7 +249,7 @@ contract Vault is IVault, Ownable {
 
             require(
                 MyERC20(wethAddress).approve(UNISWAP_V2_ROUTER, ethTokens),
-                "approve failed usdc address"
+                "approve failed eth address"
             );
             address[] memory path = new address[](2);
             path[0] = wethAddress;
@@ -268,25 +258,18 @@ contract Vault is IVault, Ownable {
                 ethTokens,
                 0,
                 path,
-                address(this),
+                msg.sender,
                 block.timestamp
             );
 
             totalVaultEth = wethToken.balanceOf(address(this));
-
-            vaults[msg.sender].collateralAmount -= usdcTokens;
-            vaults[msg.sender].debtAmount -=
-                (withdrawUSDForETH / (10 ** wethToken.decimals())) *
-                (10 ** usdcToken.decimals());
-            totalVaultUSDC -= usdcTokens;
         }
         lpToken.burn(msg.sender, lptokenAmount);
 
         emit Withdraw(
             "Withdraw",
             msg.sender,
-            vaults[msg.sender].collateralAmount,
-            vaults[msg.sender].debtAmount,
+            lptokenAmount,
             block.timestamp
         );
     }
@@ -297,11 +280,20 @@ contract Vault is IVault, Ownable {
         bSwap = true;
 
         if (
-            wethToken.balanceOf(controlAddress) <
+            controlAddress.balance <
             (10 ** (wethToken.decimals() - 1))
         ) {
             wethToken.withdraw(10 ** (wethToken.decimals() - 1));
             payable(msg.sender).transfer(address(this).balance);
+        }
+        
+        address pairAddress = factory.getPair(wethAddress, usdcAddress);
+        (uint256 resA, uint256 resB, ) = IUniswapV2Pair(pairAddress)
+            .getReserves();
+        if (wethAddress > usdcAddress) {
+            uint tmp = resA;
+            resA = resB;
+            resB = tmp;
         }
 
         if (compareStrings(curCoin, "usdc")) {
@@ -312,12 +304,16 @@ contract Vault is IVault, Ownable {
             ) {
                 bSwap = false;
             } else {
+                uint256 expectedAmountOutMin = IUniswapV2Router(UNISWAP_V2_ROUTER)
+                    .getAmountOut(totalVaultUSDC, resB, resA);
+                expectedAmountOutMin = expectedAmountOutMin * (10000 - slippage) / 10000;
+
                 address[] memory path = new address[](2);
                 path[0] = usdcAddress;
                 path[1] = wethAddress;
                 IUniswapV2Router(UNISWAP_V2_ROUTER).swapExactTokensForTokens(
                     totalVaultUSDC,
-                    0,
+                    expectedAmountOutMin,
                     path,
                     address(this),
                     block.timestamp
@@ -342,12 +338,17 @@ contract Vault is IVault, Ownable {
             ) {
                 bSwap = false;
             } else {
+                uint256 expectedAmountOutMin = IUniswapV2Router(UNISWAP_V2_ROUTER)
+                    .getAmountOut(totalVaultEth, resA, resB);
+                expectedAmountOutMin = expectedAmountOutMin * (10000 - slippage) / 10000;
+
                 address[] memory pathW = new address[](2);
                 pathW[0] = wethAddress;
                 pathW[1] = usdcAddress;
+
                 IUniswapV2Router(UNISWAP_V2_ROUTER).swapExactTokensForTokens(
                     totalVaultEth,
-                    0,
+                    expectedAmountOutMin,
                     pathW,
                     address(this),
                     block.timestamp
@@ -360,6 +361,10 @@ contract Vault is IVault, Ownable {
             }
         }
         bSwap = false;
+    }
+
+    function setSlippage(uint256 _slippage) public onlyOwner {
+        slippage = _slippage;
     }
 
     function getCurrentCoin() public view returns (string memory) {
@@ -423,6 +428,10 @@ contract Vault is IVault, Ownable {
 
     function getSwapFlag() public view returns (bool) {
         return bSwap;
+    }
+
+    function getSlippage() public view returns (uint256) {
+        return slippage;
     }
 
     function getUSDCUSDPrice() public view returns (uint256) {
